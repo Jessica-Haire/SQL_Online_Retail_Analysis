@@ -1,0 +1,116 @@
+/* Exploring data to identify where there are missing values by comparing total_rows with specific row counts */
+
+SELECT COUNT (*) as total_rows, 
+       COUNT (info.description) as count_description, 
+       COUNT(finance.listing_price) as count_listing_price,
+       COUNT(traffic.last_visited) as count_last_visited  
+FROM info
+INNER JOIN finance
+USING(product_id)
+INNER JOIN traffic
+USING(product_id)
+
+/* Identifying the company's stock range and their corresponding price distribution and count */
+
+SELECT brands.brand, 
+       finance.listing_price::integer, 
+       COUNT(*)
+FROM finance
+INNER JOIN brands
+USING(product_id)
+WHERE listing_price > 0
+GROUP BY brand, listing_price
+ORDER BY listing_price DESC
+
+/* Assigning labels to price ranges to get a high level aggregation of revenue and count */
+
+SELECT brands.brand, COUNT(*), SUM(revenue) as total_revenue, 
+CASE WHEN listing_price <42 THEN 'Budget'
+     WHEN listing_price >=42 and listing_price <74 THEN 'Average'
+     WHEN listing_price >=74 and listing_price <129 THEN 'Expensive'
+     ELSE 'Elite' END as price_category   
+FROM finance
+INNER JOIN brands
+USING(product_id)
+WHERE brand IS NOT NULL
+GROUP BY brand, price_category
+ORDER BY total_revenue desc
+
+/* Analyzing discounts offered across brands */
+
+SELECT brand, AVG(finance.discount)*100 as average_discount
+FROM brands
+INNER JOIN finance
+USING(product_id)
+WHERE brand IS NOT NULL
+GROUP BY brand
+
+/* Is there a correlation between revenue and reviews? */
+
+SELECT corr(reviews, revenue) as review_revenue_corr
+FROM reviews
+INNER JOIN finance
+USING(product_id)
+
+/* Does the length of a product's description affect its reviews? */
+
+SELECT TRUNC(length(description), -2) as description_length, 
+       ROUND(AVG(reviews.rating::numeric),2) as average_rating
+FROM info
+INNER JOIN reviews
+USING(product_id)
+WHERE description IS NOT NULL
+GROUP BY description_length
+ORDER BY description_length
+
+/* Analyzing volume of reviews by month to identify any trends or gaps */
+
+SELECT brands.brand, DATE_PART('month', traffic.last_visited) as month, COUNT(*) as num_reviews
+FROM reviews
+INNER JOIN traffic
+USING(product_id)
+INNER JOIN brands
+USING(product_id)
+WHERE brand IS NOT NULL
+AND DATE_PART('month', traffic.last_visited) IS NOT NULL
+GROUP BY brand, month
+ORDER BY brand, month
+
+/* Creating a CTE that filters for keywords which groups products into sub-category (footwear)
+ in order to compute the median revenue and number of products */
+
+with footwear as 
+(
+SELECT description, revenue
+FROM info
+INNER JOIN finance
+USING(product_id)    
+WHERE info.description ILIKE '%shoe%' 
+or info.description ILIKE '%trainer%' 
+or info.description ILIKE '%foot%'
+and info.description IS NOT NULL
+)
+SELECT COUNT(description) as num_footwear_products, 
+percentile_disc(0.5) WITHIN GROUP (ORDER BY revenue) as median_footwear_revenue
+FROM footwear
+
+/* Using the CTE above to determine the median revenue and number of products the other
+ sub-category (clothing) and its contribution to the shop */
+
+with footwear as 
+(
+SELECT description, revenue
+FROM info
+INNER JOIN finance
+USING(product_id)    
+WHERE info.description ILIKE '%shoe%' 
+or info.description ILIKE '%trainer%' 
+or info.description ILIKE '%foot%'
+and info.description IS NOT NULL
+)
+SELECT COUNT(info.description) as num_clothing_products,
+percentile_disc(0.5) WITHIN GROUP (ORDER BY revenue) as median_clothing_revenue
+FROM info
+INNER JOIN finance
+USING(product_id)
+WHERE description NOT IN (select description from footwear)
